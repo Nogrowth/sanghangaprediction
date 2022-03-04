@@ -4,7 +4,6 @@ Input = 시작날짜, 종료날짜
 """
 import FinanceDataReader as fdr
 import pandas as pd
-import pymysql
 import numpy as np
 from sqlalchemy import create_engine
 
@@ -14,9 +13,7 @@ class DBupdater:
         업데이트 날짜 확인해서 오늘이 아니면 DB 초기화
         오늘이면 프로그램 종료
         """
-        conn = pymysql.connect(host='localhost', port=3306, db='day_data', user='root', passwd='as6114')
-        cursor = conn.cursor()
-
+        self.engine = create_engine("mysql+pymysql://root:as6114@localhost:3306/stock_data", encoding='utf-8')
 
     def __del__(self):
         """소멸자 : DB 연결 해제"""
@@ -40,18 +37,27 @@ class DBupdater:
             code_list = code_list[~mask]
         code_list = code_list[~code_list.Name.str.contains('스팩')]
 
-        engine = create_engine('mysql://root:')
+        # 종목명 대문자, %는 문제를 일으키므로 변경하자
+        for i in code_list.index:
+            code_list.Name[i] = code_list.Name[i].lower()
 
-        code_list.to_sql('stock_list', )
-
-
-
+        code_list.to_sql('stock_list', self.engine, if_exists='replace', index=False)
+        print("stock_list update 완료")
 
     def get_day_data(self):
-        """받아온 종목코드로 FDR을 이용하여 일봉 데이터를 받아옴"""
+        """받아온 종목코드로 FDR을 이용하여 일봉 데이터를 받아 db에 저장"""
+        sql = 'SELECT Symbol, NAME FROM stock_list'
+        stock_list = pd.read_sql_table('stock_list', self.engine)
+        stock_list.drop('Market', axis=1, inplace=True)
 
-    def replace_into_db(self):
-        """받아온 일봉 데이터를 DB에 저장"""
+        for i in stock_list.index:
+            code, name = stock_list.Symbol[i], stock_list.Name[i]
+            df_day_data = fdr.DataReader(code, '2020')
+            df_day_data.to_sql(name, self.engine, if_exists='replace')
+            print(f'{code} {name}의 일봉 데이터 업데이트 완료....{i} / {len(stock_list)}')
+
 
 if __name__ == "__main__":
     dbu = DBupdater()
+    dbu.get_code()
+    dbu.get_day_data()
