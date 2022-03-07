@@ -13,6 +13,11 @@ from sqlalchemy import create_engine
 import random
 import tensorflow as tf
 
+# for random forest
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score # 정확도 함수
+
 class Datasetter:
     def __init__(self):
         self.engine = create_engine("mysql+pymysql://root:as6114@localhost:3306/stock_data", encoding='utf-8')
@@ -110,7 +115,7 @@ class Datasetter:
             for j in col[0:5]:
                 col.append(j + f'+{i}')
 
-        dataset_x = dataset[[col]]
+        dataset_x = dataset[col]
         dataset_y = dataset[['upper limit next day']]
 
         # dataset_y 의 dtype을 category로 변경
@@ -140,11 +145,66 @@ class Datasetter:
         # 모델 학습
         model.fit(train_x, train_y, epochs=1000)
 
+    def random_forest(self):
+        sql = 'select * from `dataset_limit`'
+        dataset_1 = pd.read_sql(sql, self.engine_datasets)
+        sql = 'select * from `dataset_not_limit`'
+        dataset_2 = pd.read_sql(sql, self.engine_datasets)
+
+        dataset = pd.concat([dataset_1, dataset_2])
+
+        # randomization
+        dataset = dataset.sample(frac=1).reset_index(drop=True)
+
+        # 독립변수, 종속변수 분리
+        col = ['o', 'h', 'l', 'c', 'v']
+        for i in range(1, self.n):
+            for j in col[0:5]:
+                col.append(j + f'+{i}')
+
+        dataset_x = dataset[col]
+        dataset_y = dataset[['upper limit next day']]
+
+        # dataset_y 의 dtype을 category로 변경
+        dataset_y['upper limit next day'] = dataset_y['upper limit next day'].astype('category')
+
+        # train / test data 분리
+        train_x = dataset_x[0:int(0.2 * len(dataset_x))]
+        test_x = dataset_x[int(0.2 * len(dataset_x)):]
+        train_y = dataset_y[0:int(0.2 * len(dataset_y))]
+        test_y = dataset_y[int(0.2 * len(dataset_y)):]
+
+        # 모델 생성
+        clf = RandomForestClassifier(n_estimators=100, max_depth=20, random_state=0)
+        clf.fit(train_x, train_y)
+
+        # 정확도 확인
+        predict2 = clf.predict(test_x)
+        print('모델의 정확도를 출력합니다.')
+        print(accuracy_score(test_y, predict2))
+
+        tomm_prediction = pd.DataFrame([], columns=['Name', 'Prediction'])
+        for idx, name in enumerate(self.stock_list):
+            name = name[0]
+            # 오늘날짜 기준 데이터
+            sql = f"SELECT `Date`, `Open`, `Low`, `High`, `Close`, `Volume` FROM `{name}` WHERE `Date` <= '2022-03-07' " \
+                  f"ORDER BY `Date` desc LIMIT 10"
+            real_data = pd.read_sql(sql, self.engine)
+            real_data.sort_values('Date', inplace=True)
+            real_data.drop('Date', axis=1, inplace=True)
+            if real_data.size == 50:
+                real_data_flat = real_data.values.reshape(1, 50)
+                predict = clf.predict(real_data_flat)
+                df_1 = pd.DataFrame({'Name':name, 'Prediction':predict})
+                tomm_prediction = pd.concat([tomm_prediction, df_1])
+                print(f'{name} 종목의 예측 결과를 저장했습니다. ({idx}/{len(self.stock_list)})')
+        tomm_prediction.to_sql('predict_20220308', self.engine_datasets, if_exists = 'replace', index = False)
 
 if __name__ == "__main__":
     ds = Datasetter()
     # ds.sanghanga_collection()
     # ds.control_collection()
+    ds.random_forest()
 
 
 
