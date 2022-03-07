@@ -47,6 +47,9 @@ class DBupdater:
         for etf in etf_name_list:
             code_list = code_list[~code_list.Name.str.startswith(etf)]
 
+        # 종목명에 200 들어가는 미처 안지워진 종목 삭제
+        code_list = code_list[~code_list.Name.str.contains('200')]
+
         code_list.to_sql('stock_list', self.engine, if_exists='replace', index=False)
         print("stock_list update 완료")
 
