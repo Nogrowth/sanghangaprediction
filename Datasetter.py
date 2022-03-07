@@ -17,8 +17,8 @@ class Datasetter:
         self.engine = create_engine("mysql+pymysql://root:as6114@localhost:3306/stock_data", encoding='utf-8')
 
     def sanghanga_collection(self):
-        sql = 'select `Open`, High, Low, Close, Volume, `Change` from 유앤아이 where `Change` > 0.29'
-        data = pd.read_sql(self.engine, sql)
+        sql = 'select `Date`, `Open`, High, Low, Close, Volume, `Change` from 유앤아이 where `Change` > 0.29'
+        data = pd.read_sql(sql, self.engine)
         df = pd.DataFrame(data, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change'])
         df['Name'] = '유앤아이'
         df = df[['Name', 'Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change']]
@@ -29,7 +29,7 @@ class Datasetter:
 
         for date in df.Date:
             sql = f"select Date, Open, High, Low, Close, Volume, `Change` from 유앤아이 where Date < '{date}' order by `Date` desc limit 10"
-            prev_10_data_for_date = pd.DataFrame(self.engine.execute(sql).fetchall()).sort_values('Date').reset_index(drop=True)
+            prev_10_data_for_date = pd.read_sql(sql, self.engine).sort_values('Date').reset_index(drop=True)
             # 특정 날짜에 대한 위로 10개의 data 들 => 이게 독립변수
 
 

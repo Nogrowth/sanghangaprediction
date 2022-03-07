@@ -41,6 +41,12 @@ class DBupdater:
         for i in code_list.index:
             code_list.Name[i] = code_list.Name[i].lower()
 
+        # ETF fund 관련 종목 삭제
+        etf_name_list = ['arirang', 'focus', 'hanaro', 'kbstar', 'kindex', 'kodex', 'kosef', 'master', 'sol',
+                         'tiger', 'timefolio', 'trex', '마이티', '미래에셋글로벌리츠']
+        for etf in etf_name_list:
+            code_list = code_list[~code_list.Name.str.startswith(etf)]
+
         code_list.to_sql('stock_list', self.engine, if_exists='replace', index=False)
         print("stock_list update 완료")
 
@@ -53,6 +59,14 @@ class DBupdater:
         for i in stock_list.index:
             code, name = stock_list.Symbol[i], stock_list.Name[i]
             df_day_data = fdr.DataReader(code, '2020')
+            # 거래 정지 등에는 O, H, L가 0으로 나오는 문제가 있어서 이를 수정
+            if len(df_day_data[df_day_data.Open == 0]) != 0:
+                for idx in df_day_data[df_day_data.Open ==0].index:
+                    close = df_day_data.loc[idx]['Close']
+                    df_day_data['Open'][idx] = close
+                    df_day_data['High'][idx] = close
+                    df_day_data['Low'][idx] = close
+
             df_day_data.to_sql(name, self.engine, if_exists='replace')
             print(f'{code} {name}의 일봉 데이터 업데이트 완료....{i} / {len(stock_list)}')
 
