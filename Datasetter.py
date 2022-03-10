@@ -62,10 +62,11 @@ class Datasetter:
                 else:
                     flat_data = np.append(flat_data, np.array([0]))
                 dataset.loc[len(dataset)] = flat_data
-        print(dataset)
+        dataset.to_sql(f'{end_date}_10ohlcv_data', self.engine_datasets, index=False)
+        print(f'{end_date}의 상한가여부 및 이전 10일치 ohlcv data를 dataset DB에 저장하였습니다. ')
 
 
-    def learning_model(self):
+    def mlp_model(self):
         sql = 'select * from `dataset_limit`'
         dataset_1 = pd.read_sql(sql, self.engine_datasets)
         sql = 'select * from `dataset_not_limit`'
@@ -112,28 +113,18 @@ class Datasetter:
         # 모델 학습
         model.fit(train_x, train_y, epochs=1000)
 
-    def random_forest(self):
-        sql = 'select * from `dataset_limit`'
-        dataset_1 = pd.read_sql(sql, self.engine_datasets)
-        sql = 'select * from `dataset_not_limit`'
-        dataset_2 = pd.read_sql(sql, self.engine_datasets)
-
-        dataset = pd.concat([dataset_1, dataset_2])
+    def random_forest(self, target_date):
+        sql = f'select * from `{target_date}_10ohlcv_data`'
+        dataset = pd.read_sql(sql, self.engine_datasets)
 
         # randomization
         dataset = dataset.sample(frac=1).reset_index(drop=True)
 
-        # 독립변수, 종속변수 분리
-        col = ['o', 'h', 'l', 'c', 'v']
-        for i in range(1, self.n):
-            for j in col[0:5]:
-                col.append(j + f'+{i}')
-
-        dataset_x = dataset[col]
-        dataset_y = dataset[['upper limit next day']]
+        dataset_x = dataset.drop('upper_limit_tomorrow', axis=1)
+        dataset_y = dataset[['upper_limit_tomorrow']]
 
         # dataset_y 의 dtype을 category로 변경
-        dataset_y['upper limit next day'] = dataset_y['upper limit next day'].astype('category')
+        dataset_y['upper_limit_tomorrow'] = dataset_y['upper_limit_tomorrow'].astype('category')
 
         # train / test data 분리
         train_x = dataset_x[0:int(0.2 * len(dataset_x))]
@@ -146,9 +137,15 @@ class Datasetter:
         clf.fit(train_x, train_y)
 
         # 정확도 확인
-        predict2 = clf.predict(test_x)
+        predict_train = clf.predict(train_x)
         print('모델의 정확도를 출력합니다.')
-        print(accuracy_score(test_y, predict2))
+        print(accuracy_score(train_y, predict_train))
+
+        predict_test = clf.predict(test_x)
+        print('모델의 정확도를 출력합니다.')
+        print(accuracy_score(test_y, predict_test))
+
+        #@!@! 아래부터 수정 필요함
 
         tomm_prediction = pd.DataFrame([], columns=['Name', 'Prediction'])
         for idx, name in enumerate(self.stock_list):
@@ -165,7 +162,7 @@ class Datasetter:
                 df_1 = pd.DataFrame({'Name':name, 'Prediction':predict})
                 tomm_prediction = pd.concat([tomm_prediction, df_1])
                 print(f'{name} 종목의 예측 결과를 저장했습니다. ({idx}/{len(self.stock_list)})')
-        tomm_prediction.to_sql('predict_20220308', self.engine_datasets, if_exists = 'replace', index = False)
+        tomm_prediction.to_sql('predict_20220308', self.engine_datasets, if_exists='replace', index=False)
 
 if __name__ == "__main__":
     ds = Datasetter()
