@@ -9,9 +9,11 @@ random data에 대해 똑같이 한다.
 one-hot-encoding 으로 상한가/비상한가를 구분한다.
 """
 import pandas as pd
+import numpy as np
 from sqlalchemy import create_engine
 import random
 import tensorflow as tf
+from datetime import date, datetime
 
 # for random forest
 from sklearn.model_selection import train_test_split
@@ -30,73 +32,38 @@ class Datasetter:
         self.stock_list = self.engine.execute(sql).fetchall()
         self.stock_list.remove(('stock_list', ))
 
-    def sanghanga_collection(self):
-        col_x = ['o', 'h', 'l', 'c', 'v']
+        # data setting 용 column set
+        self.col = ['o', 'h', 'l', 'c', 'v']
         for i in range(1, self.n):
-            for j in col_x[0:5]:
-                col_x.append(j + f'+{i}')
+            for mkr in self.col[0:5]:
+                self.col.append(mkr + f'+{i}')
+        self.col.append('upper_limit_tomorrow')
 
-        # 독립변수 데이터 SET 설정
-        x = pd.DataFrame([], columns=col_x)
-
-        for idx, i in enumerate(self.stock_list):
-            name = i[0]
-            sql = f'select `Date`, `Open`, High, Low, Close, Volume, `Change` from `{name}` where `Change` > 0.29'
-            data = pd.read_sql(sql, self.engine)
-            df = pd.DataFrame(data, columns=['Date', 'Open', 'High', 'Low', 'Close', 'Volume', 'Change'])
-            df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
-            # name 종목의 상한가 날짜의 dataframe
-
-            for date in df.Date:
-                sql = f"select Date, Open, High, Low, Close, Volume, `Change` from `{name}` where Date < '{date}' order by `Date` desc limit {self.n}"
-                prev_n_data_for_date = pd.read_sql(sql, self.engine).sort_values('Date').reset_index(drop=True)
-                # 특정 날짜에 대한 위로 n개의 data 들 => 이게 독립변수
-                prev_n_data_for_date = prev_n_data_for_date[['Open', 'High', 'Low', 'Close', 'Volume']]
-                if prev_n_data_for_date.size == 5*self.n:
-                    flat_data = prev_n_data_for_date.values.reshape(1, 5*self.n)
-                    df_flat = pd.DataFrame(flat_data, columns=col_x)
-                    x = pd.concat([x, df_flat])
-            print(f'dataset_x collecting... ({idx}/{len(self.stock_list)})')
-        x['upper limit next day'] = 1
-        x.to_sql('dataset_limit', self.engine_datasets, if_exists='replace', index=False)
-        self.len_x = len(x)
-
-        # 앞에 이름없는 index 지우기
-        # randomization 하기
-
-    def control_collection(self):
+    def data_collection(self, end_date):
         """
-        sanahanga_collection method 에서 모은 m개의 데이터와 학습 시 대조할 m개의 데이터를 랜덤하게 뽑기
+        특정 날짜에 이전 n일치 ohclv column (total 5n개) + 상한가 여부 판단하는 column 1개 모으기
         """
-        col_y = ['o', 'h', 'l', 'c', 'v']
-        for i in range(1, self.n):
-            for j in col_y[0:5]:
-                col_y.append(j + f'+{i}')
+        dataset = pd.DataFrame([], columns=self.col)
+        end_date = '2022-02-17'
+        end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
+        for name in self.stock_list:
+        # date 날짜의 Change 및 이전 n일간의 ohlcv 모으기
+            name = name[0]
+            sql = f'select `Date`, `Open`, `High`, `Low`, `Close`, `Volume` from `{name}` where `Date` < "{end_date}" order by `Date` desc limit {self.n}'
+            ohlcv_10 = pd.read_sql(sql, self.engine)
+            ohlcv_10.sort_values('Date', inplace=True)
+            ohlcv_10.drop('Date', axis=1, inplace=True)
+            if ohlcv_10.size == 5 * self.n:
+                flat_data = ohlcv_10.values.reshape(5*self.n, )
+                sql = f'select `Change` from `{name}` where `Date`="{end_date}"'
+                change = self.engine.execute(sql).fetchone()[0]
+                if change > 0.295:
+                    flat_data = np.append(flat_data, np.array([1]))
+                else:
+                    flat_data = np.append(flat_data, np.array([0]))
+                dataset.loc[len(dataset)] = flat_data
+        print(dataset)
 
-        # 독립변수 데이터 SET 설정
-        y = pd.DataFrame([], columns=col_y)
-        while len(y) <= self.len_x:
-            # stock_list 에서 random 하게 한 원소 뽑아서
-            name = random.sample(self.stock_list, 1)[0][0]
-            # 해당 종목에서 random 하게 한 줄 고르고 change 가 0.29 미만이면 그 행 포함 10개 row 를 가져오자.
-            sql = f"select `Date`, `Open`, `Low`, `High`, `Close`, `Volume`, `Change` FROM `{name}` ORDER BY RAND() LIMIT 1"
-            rand_row = self.engine.execute(sql).fetchone()
-            # change 가 0.295 미만일 때, 즉 상한가가 아닌 데이터만 모아서
-            # 이 날짜 포함 10개 row를 가져와서 y에 추가해준다.
-            # 언제까지? y의 길이가 x와 동등해질 때 까지
-            if (rand_row[6]) and (rand_row[6] < 0.295):
-                rand_date = rand_row[0]
-                sql = f"SELECT `Date`, `Open`, `Low`, `High`, `Close`, `Volume` FROM `{name}` WHERE `Date` <= '{rand_date}' ORDER BY `Date` desc LIMIT {self.n}"
-                rand_n_row = pd.read_sql(sql, self.engine)
-                rand_n_row.sort_values('Date', inplace=True)
-                rand_n_row.drop('Date', axis=1, inplace=True)
-                if len(rand_n_row) == self.n:
-                    rand_n_row_flat = rand_n_row.values.reshape(1, 5*self.n)
-                    df_flat = pd.DataFrame(rand_n_row_flat, columns=col_y)
-                    y = pd.concat([y, df_flat])
-            print(f'dataset_y collecting... ({len(y)}/{self.len_x})')
-        y['upper limit next day'] = 0
-        y.to_sql('dataset_not_limit', self.engine_datasets, if_exists='replace', index=False)
 
     def learning_model(self):
         sql = 'select * from `dataset_limit`'
@@ -202,9 +169,7 @@ class Datasetter:
 
 if __name__ == "__main__":
     ds = Datasetter()
-    # ds.sanghanga_collection()
-    # ds.control_collection()
-    ds.random_forest()
+    ds.data_collection('2022-02-17')
 
 
 
