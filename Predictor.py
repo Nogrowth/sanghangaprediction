@@ -20,7 +20,11 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score # 정확도 함수
 
-class Datasetter:
+# for save model on pickle fmt
+import pickle
+import joblib
+
+class Predictor:
     def __init__(self):
         self.engine = create_engine("mysql+pymysql://root:as6114@localhost:3306/stock_data", encoding='utf-8')
         self.engine_datasets = create_engine("mysql+pymysql://root:as6114@localhost:3306/datasets", encoding='utf-8')
@@ -62,7 +66,7 @@ class Datasetter:
                 else:
                     flat_data = np.append(flat_data, np.array([0]))
                 dataset.loc[len(dataset)] = flat_data
-        dataset.to_sql(f'{end_date}_10ohlcv_data', self.engine_datasets, index=False)
+        dataset.to_sql(f'{end_date}_10ohlcv_data', self.engine_datasets, index=False, if_exists='replace')
         print(f'{end_date}의 상한가여부 및 이전 10일치 ohlcv data를 dataset DB에 저장하였습니다. ')
 
 
@@ -145,28 +149,40 @@ class Datasetter:
         print('모델의 정확도를 출력합니다.')
         print(accuracy_score(test_y, predict_test))
 
-        #@!@! 아래부터 수정 필요함
+        # 모델 저장
+        joblib.dump(clf, './random_forest_model.pkl')
 
-        tomm_prediction = pd.DataFrame([], columns=['Name', 'Prediction'])
+    def prediction(self, prediction_date):
+        """
+        model 을 바탕으로 내일 상한가 여부를 예측하여 DB에 저장
+        """
+        today = datetime.today().date()
+        prediction = pd.DataFrame([], columns=['Name', 'Prediction'])
         for idx, name in enumerate(self.stock_list):
             name = name[0]
             # 오늘날짜 기준 데이터
-            sql = f"SELECT `Date`, `Open`, `Low`, `High`, `Close`, `Volume` FROM `{name}` WHERE `Date` <= '2022-03-07' " \
+            sql = f"SELECT `Date`, `Open`, `Low`, `High`, `Close`, `Volume` FROM `{name}` WHERE `Date` <= '{today}' " \
                   f"ORDER BY `Date` desc LIMIT 10"
             real_data = pd.read_sql(sql, self.engine)
             real_data.sort_values('Date', inplace=True)
             real_data.drop('Date', axis=1, inplace=True)
-            if real_data.size == 50:
-                real_data_flat = real_data.values.reshape(1, 50)
-                predict = clf.predict(real_data_flat)
-                df_1 = pd.DataFrame({'Name':name, 'Prediction':predict})
-                tomm_prediction = pd.concat([tomm_prediction, df_1])
+
+            # model 불러오기
+            loaded_model = joblib.load('./random_forest_model.pkl')
+
+            if real_data.size == 5 * self.n:
+                real_data_flat = real_data.values.reshape(1, 5 * self.n)
+                predict = loaded_model.predict(real_data_flat)
+                df_predict_result = pd.DataFrame({'Name': name, 'Prediction': predict})
+                prediction = pd.concat([prediction, df_predict_result])
                 print(f'{name} 종목의 예측 결과를 저장했습니다. ({idx}/{len(self.stock_list)})')
-        tomm_prediction.to_sql('predict_20220308', self.engine_datasets, if_exists='replace', index=False)
+        prediction.to_sql(f'predict_{today}', self.engine_datasets, if_exists='replace', index=False)
 
 if __name__ == "__main__":
-    ds = Datasetter()
-    ds.data_collection('2022-02-17')
+    p = Predictor()
+    p.data_collection('2022-02-17')
+    p.random_forest('2022-02-17')
+    p.prediction()
 
 
 
