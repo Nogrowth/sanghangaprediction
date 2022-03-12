@@ -8,6 +8,7 @@ import numpy as np
 from sqlalchemy import create_engine
 import datetime
 
+
 class DBupdater:
     def __init__(self):
         """생성자 : DB 연결 및 현재 종목코드 딕셔너리 생성
@@ -61,25 +62,25 @@ class DBupdater:
     def get_day_data_initial(self):
         """초기 실행 시 받아온 종목코드로 FDR 을 이용하여 일봉 데이터를 받아 db에 저장"""
         # 초기 실행 확인
-        sql = 'select * from `stock_list`'
+        sql = "SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema = 'stock_data' AND TABLE_NAME != 'stock_list'"
         check_initial = self.engine.execute(sql).fetchone()
-        if not check_initial:
-            sql = 'SELECT Symbol, NAME FROM stock_list'
-            stock_list = pd.read_sql_table('stock_list', self.engine, columns=['Symbol', 'Name'])
+        if type(check_initial) != type(None):
+            return None
 
-            for i in stock_list.index:
-                code, name = stock_list.Symbol[i], stock_list.Name[i]
-                df_day_data = fdr.DataReader(code, '2021')
-                # 거래 정지 등에는 O, H, L가 0으로 나오는 문제가 있어서 이를 수정
-                if len(df_day_data[df_day_data.Open == 0]) != 0:
-                    for idx in df_day_data[df_day_data.Open ==0].index:
-                        close = df_day_data.loc[idx]['Close']
-                        df_day_data['Open'][idx] = close
-                        df_day_data['High'][idx] = close
-                        df_day_data['Low'][idx] = close
+        stock_list = pd.read_sql_table('stock_list', self.engine, columns=['Symbol', 'Name'])
+        for i in stock_list.index:
+            code, name = stock_list.Symbol[i], stock_list.Name[i]
+            df_day_data = fdr.DataReader(code, '2021')
+            # 거래 정지 등에는 O, H, L가 0으로 나오는 문제가 있어서 이를 수정
+            if len(df_day_data[df_day_data.Open == 0]) != 0:
+                for idx in df_day_data[df_day_data.Open == 0].index:
+                    close = df_day_data.loc[idx]['Close']
+                    df_day_data['Open'][idx] = close
+                    df_day_data['High'][idx] = close
+                    df_day_data['Low'][idx] = close
 
-                df_day_data.to_sql(name, self.engine, if_exists='replace')
-                print(f'{code} {name}의 일봉 데이터 초기화 완료....{i} / {len(stock_list)}')
+            df_day_data.to_sql(name, self.engine, if_exists='replace')
+            print(f'{code} {name}의 일봉 데이터 초기화 완료....{i} / {len(stock_list)}')
 
     def add_day_data(self):
         """
@@ -94,11 +95,11 @@ class DBupdater:
             # 현재 db의 해당종목 테이블의 마지막 날짜 받기
             # 만약 새로 생긴 종목이라 이전 테이블이 없는 경우가 있으므로 테이블이 있는지 확인
             sql_check = f"SELECT TABLE_NAME FROM information_schema.tables " \
-                  f"WHERE table_schema='stock_data' AND TABLE_NAME='{name}' LIMIT 1"
-            if self.engine.execute(sql_check).fetchone() :
+                        f"WHERE table_schema='stock_data' AND TABLE_NAME='{name}' LIMIT 1"
+            if not self.engine.execute(sql_check).fetchone():
                 sql = f'SELECT `Date` FROM `{name}` ORDER BY `Date` DESC LIMIT 1'
                 last_date = self.engine.execute(sql).fetchone()[0]
-                df_day_data = fdr.DataReader(sym, start=last_date+datetime.timedelta(days=1))
+                df_day_data = fdr.DataReader(sym, start=last_date + datetime.timedelta(days=1))
                 if len(df_day_data[df_day_data.Open == 0]) != 0:
                     for idx in df_day_data[df_day_data.Open == 0].index:
                         close = df_day_data.loc[idx]['Close']
@@ -112,7 +113,6 @@ class DBupdater:
 if __name__ == "__main__":
     dbu = DBupdater()
     # stock_list table 초기화 및 실행 당시의 종목 리스트 구성
-    dbu.get_code()
+    # dbu.get_code()
     dbu.get_day_data_initial()
     dbu.add_day_data()
-
