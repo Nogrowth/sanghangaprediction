@@ -46,12 +46,12 @@ class Predictor:
     def data_collection(self, end_date):
         """
         특정 날짜에 이전 n일치 ohclv column (total 5n개) + 상한가 여부 판단하는 column 1개 모으기
+        이때 인수합병 or 상장폐지 등으로 최근 데이터가 없는 경우 change를 불러오는 행에서 오류가 난다. -> 이는 추후 updater를 매번 새로 싹 가져오는 방법으로 수정하면 해결되긴 함
         """
         dataset = pd.DataFrame([], columns=self.col)
-        end_date = '2022-02-17'
         end_date = datetime.strptime(end_date, '%Y-%m-%d').date()
         for name in self.stock_list:
-        # date 날짜의 Change 및 이전 n일간의 ohlcv 모으기
+            # date 날짜의 Change 및 이전 n일간의 ohlcv 모으기
             name = name[0]
             sql = f'select `Date`, `Open`, `High`, `Low`, `Close`, `Volume` from `{name}` where `Date` < "{end_date}" order by `Date` desc limit {self.n}'
             ohlcv_10 = pd.read_sql(sql, self.engine)
@@ -68,7 +68,6 @@ class Predictor:
                 dataset.loc[len(dataset)] = flat_data
         dataset.to_sql(f'{end_date}_10ohlcv_data', self.engine_datasets, index=False, if_exists='replace')
         print(f'{end_date}의 상한가여부 및 이전 10일치 ohlcv data를 dataset DB에 저장하였습니다. ')
-
 
     def mlp_model(self):
         sql = 'select * from `dataset_limit`'
@@ -136,32 +135,35 @@ class Predictor:
         train_y = dataset_y[0:int(0.2 * len(dataset_y))]
         test_y = dataset_y[int(0.2 * len(dataset_y)):]
 
+        print(train_x, test_x)
+
         # 모델 생성
-        clf = RandomForestClassifier(n_estimators=100, max_depth=20, random_state=0)
+        clf = RandomForestClassifier(n_estimators=10, max_depth=3, random_state=0)
         clf.fit(train_x, train_y)
 
         # 정확도 확인
         predict_train = clf.predict(train_x)
-        print('모델의 정확도를 출력합니다.')
+        print('train data 에서 모델의 정확도를 출력합니다.')
         print(accuracy_score(train_y, predict_train))
 
         predict_test = clf.predict(test_x)
-        print('모델의 정확도를 출력합니다.')
+        print('test data에서 모델의 정확도를 출력합니다.')
         print(accuracy_score(test_y, predict_test))
 
         # 모델 저장
         joblib.dump(clf, './random_forest_model.pkl')
+        print('모델을 저장했습니다.')
 
     def prediction(self, prediction_date):
         """
         model 을 바탕으로 내일 상한가 여부를 예측하여 DB에 저장
         """
-        today = datetime.today().date()
+        # today = datetime.today().date()
         prediction = pd.DataFrame([], columns=['Name', 'Prediction'])
         for idx, name in enumerate(self.stock_list):
             name = name[0]
             # 오늘날짜 기준 데이터
-            sql = f"SELECT `Date`, `Open`, `Low`, `High`, `Close`, `Volume` FROM `{name}` WHERE `Date` <= '{today}' " \
+            sql = f"SELECT `Date`, `Open`, `Low`, `High`, `Close`, `Volume` FROM `{name}` WHERE `Date` <= '{prediction_date}' " \
                   f"ORDER BY `Date` desc LIMIT 10"
             real_data = pd.read_sql(sql, self.engine)
             real_data.sort_values('Date', inplace=True)
@@ -176,13 +178,13 @@ class Predictor:
                 df_predict_result = pd.DataFrame({'Name': name, 'Prediction': predict})
                 prediction = pd.concat([prediction, df_predict_result])
                 print(f'{name} 종목의 예측 결과를 저장했습니다. ({idx}/{len(self.stock_list)})')
-        prediction.to_sql(f'predict_{today}', self.engine_datasets, if_exists='replace', index=False)
+        prediction.to_sql(f'predict_{prediction_date}', self.engine_datasets, if_exists='replace', index=False)
 
 if __name__ == "__main__":
     p = Predictor()
-    p.data_collection('2022-02-17')
-    p.random_forest('2022-02-17')
-    p.prediction()
+    # p.data_collection('2022-04-05')
+    p.random_forest('2022-04-05')
+    # p.prediction('2022-04-05')
 
 
 
